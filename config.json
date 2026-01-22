@@ -1,5 +1,14 @@
 {
-    "nodes": ["https://testapi.steem-engine.com"],
+    "nodes": [
+        "https://enginerpc.com",
+        "https://api.hive-engine.com/rpc/",
+        "https://api2.hive-engine.com/rpc/",
+        "https://herpc.dtools.dev",
+        "https://he.atexoras.com:2083",
+        "https://herpc.actifit.io",
+        "https://he.c0ff33a.uk",
+        "https://herpc.kanibot.com"
+    ],
     "lastSSCBlockParsed": 0,
     "port": 3000,
     "pollingTime": 1000
