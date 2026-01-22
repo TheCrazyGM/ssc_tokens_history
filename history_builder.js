@@ -1,8 +1,8 @@
 require('dotenv').config();
-const { Pool } = require('pg');
 const nodeCleanup = require('node-cleanup');
 const fs = require('fs-extra');
 const SSC = require('sscjs');
+const db = require('./db');
 const { Queue } = require('./libs/Queue');
 const config = require('./config');
 
@@ -18,9 +18,6 @@ const getSSCNode = () => {
 };
 
 let ssc = new SSC(getSSCNode());
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 const TOKENS_CONTRACT_NAME = 'tokens';
 const TRANSFER = 'transfer';
@@ -35,7 +32,11 @@ async function parseBlock(block) {
   console.log(`parsing block #${blockNumber}`); // eslint-disable-line no-console
 
   const nbTxs = transactions.length;
-  const finalTimestamp = `${timestamp}.000Z`;
+  // Knex will handle timestamp formatting for supported DBs usually,
+  // but keeping basic date object or ISO string is safer.
+  // Original code appended .000Z to timestamp which implies it came as ISO string without ms?
+  // Let's assume timestamp is ISO string.
+  const finalTimestamp = new Date(`${timestamp}.000Z`);
 
   for (let index = 0; index < nbTxs; index += 1) {
     const tx = transactions[index];
@@ -61,7 +62,7 @@ async function parseBlock(block) {
 
       if (events && events.length > 0) {
         let txToSave = false;
-        let values;
+        let insertData = {};
         const nbEvents = events.length;
 
         for (let idx = 0; idx < nbEvents; idx += 1) {
@@ -77,16 +78,43 @@ async function parseBlock(block) {
             } = ev.data;
 
             if (ev.event === TRANSFER) {
-              values = [blockNumber, finalTxId, finalTimestamp, symbol, from, 'user', to, 'user', quantity];
-
+              insertData = {
+                block: blockNumber,
+                txid: finalTxId,
+                timestamp: finalTimestamp,
+                symbol,
+                from,
+                from_type: 'user',
+                to,
+                to_type: 'user',
+                quantity
+              };
               txToSave = true;
             } else if (ev.event === TRANSFER_TO_CONTRACT) {
-              values = [blockNumber, finalTxId, finalTimestamp, symbol, from, 'user', to, 'contract', quantity];
-
+              insertData = {
+                block: blockNumber,
+                txid: finalTxId,
+                timestamp: finalTimestamp,
+                symbol,
+                from,
+                from_type: 'user',
+                to,
+                to_type: 'contract',
+                quantity
+              };
               txToSave = true;
             } else if (ev.event === TRANSFER_FROM_CONTRACT) {
-              values = [blockNumber, finalTxId, finalTimestamp, symbol, from, 'contract', to, 'user', quantity];
-
+              insertData = {
+                block: blockNumber,
+                txid: finalTxId,
+                timestamp: finalTimestamp,
+                symbol,
+                from,
+                from_type: 'contract',
+                to,
+                to_type: 'user',
+                quantity
+              };
               txToSave = true;
             }
 
@@ -101,17 +129,13 @@ async function parseBlock(block) {
               }
 
               const memo = payloadObj ? payloadObj.memo : null;
-              let query = '';
 
               if (memo && typeof memo === 'string') {
-                values.push(memo);
-                query = 'INSERT INTO transactions("block", "txid", "timestamp", "symbol", "from", "from_type", "to", "to_type", "quantity", "memo") VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)';
-              } else {
-                query = 'INSERT INTO transactions("block", "txid", "timestamp", "symbol", "from", "from_type", "to", "to_type", "quantity") VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)';
+                insertData.memo = memo;
               }
 
               // add the transaction to the history
-              await pool.query(query, values); // eslint-disable-line no-await-in-loop
+              await db('transactions').insert(insertData); // eslint-disable-line no-await-in-loop
             }
           }
         }
@@ -150,6 +174,6 @@ nodeCleanup((exitCode, signal) => { // eslint-disable-line no-unused-vars
   const conf = fs.readJSONSync('./config.json');
   conf.lastSSCBlockParsed = lastSSCBlockParsed + 1;
   fs.writeJSONSync('./config.json', conf, { spaces: 4 });
-  pool.end();
+  db.destroy();
   console.log('done saving conf'); // eslint-disable-line no-console
 });

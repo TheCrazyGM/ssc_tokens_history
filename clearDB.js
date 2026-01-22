@@ -1,20 +1,16 @@
-require('dotenv').config();
-const { Pool } = require('pg');
+const db = require('./db');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-
-async function initDB() {
-  const query = `
-  -- Table: transactions
-
-  delete from transactions;
-`;
-
-  await pool.query(query);
-
-  pool.end();
+async function clearDB() {
+  try {
+    console.log('Clearing transactions table...');
+    // Truncate is cleaner than delete for full clear
+    await db('transactions').truncate();
+    console.log('Database cleared.');
+  } catch (err) {
+    console.error('Error clearing database:', err);
+  } finally {
+    db.destroy();
+  }
 }
 
-initDB();
+clearDB();

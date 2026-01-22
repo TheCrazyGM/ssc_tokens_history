@@ -1,43 +1,37 @@
-require('dotenv').config();
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const db = require('./db');
 
 async function initDB() {
-  const query = `
-  SET TIME ZONE 'UTC';
+  try {
+    // Drop table if exists
+    const exists = await db.schema.hasTable('transactions');
+    if (exists) {
+      console.log('Dropping existing transactions table...');
+      await db.schema.dropTable('transactions');
+    }
 
-  -- Table: transactions
+    console.log('Creating transactions table...');
+    await db.schema.createTable('transactions', (table) => {
+      table.bigInteger('block');
+      table.string('txid').primary();
+      table.timestamp('timestamp').notNullable(); // Knex handles DB specifics for timestamp
+      table.string('symbol').notNullable();
+      table.string('from').notNullable();
+      table.string('from_type').notNullable();
+      table.string('to').notNullable();
+      table.string('to_type').notNullable();
+      table.string('memo');
+      table.decimal('quantity', 24, 8); // Adjusted precision/scale as generic numeric might default poorly
+      
+      // Index
+      table.index('timestamp', 'idx_transactions_timestamp');
+    });
 
-  DROP INDEX IF EXISTS idx_transactions_timestamp;
-  DROP TABLE IF EXISTS transactions;
-
-  CREATE TABLE transactions
-  (
-      "block" numeric,
-      "txid" text COLLATE pg_catalog."default" NOT NULL,
-      "timestamp" timestamp with time zone NOT NULL,
-      "symbol" text COLLATE pg_catalog."default" NOT NULL,
-      "from" text COLLATE pg_catalog."default" NOT NULL,
-      "from_type" text COLLATE pg_catalog."default" NOT NULL,
-      "to" text COLLATE pg_catalog."default" NOT NULL,
-      "to_type" text COLLATE pg_catalog."default" NOT NULL,
-      "memo" text COLLATE pg_catalog."default" NULL,
-      "quantity" numeric,
-      CONSTRAINT transactions_pkey PRIMARY KEY (txid)
-  );
-
-  -- Index: idx_transactions_timestamp
-
-  CREATE INDEX IF NOT EXISTS idx_transactions_timestamp
-      ON transactions USING btree
-      ("timestamp");`;
-
-  await pool.query(query);
-
-  pool.end();
+    console.log('Database initialized successfully.');
+  } catch (err) {
+    console.error('Error initializing database:', err);
+  } finally {
+    db.destroy();
+  }
 }
 
 initDB();
