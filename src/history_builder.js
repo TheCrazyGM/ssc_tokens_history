@@ -4,7 +4,7 @@ const fs = require('fs-extra');
 const SSC = require('sscjs');
 const db = require('./db');
 const { Queue } = require('./libs/Queue');
-const config = require('./config');
+const config = require('../config');
 
 const sscNodes = new Queue();
 config.nodes.forEach(node => sscNodes.push(node));

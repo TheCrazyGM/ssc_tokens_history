@@ -4,7 +4,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const nodeCleanup = require('node-cleanup');
 const db = require('./db');
-const config = require('./config');
+const config = require('../config');
 
 const app = express();
 app.use(cors({ methods: ['GET'] }));

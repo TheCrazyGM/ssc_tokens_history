@@ -2,8 +2,12 @@
   "name": "ssc_account_history",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/server.js",
   "scripts": {
+    "start": "node src/server.js",
+    "history": "node src/history_builder.js",
+    "init-db": "node scripts/initDB.js",
+    "clear-db": "node scripts/clearDB.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
