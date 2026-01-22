@@ -27,9 +27,6 @@ async function initDB() {
       "memo" text COLLATE pg_catalog."default" NULL,
       "quantity" numeric,
       CONSTRAINT transactions_pkey PRIMARY KEY (txid)
-  )
-  WITH (
-      OIDS = FALSE
   );
 
   -- Index: idx_transactions_timestamp

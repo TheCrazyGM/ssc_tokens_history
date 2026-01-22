@@ -46,7 +46,14 @@ async function parseBlock(block) {
       logs,
     } = tx;
 
-    const logsObj = JSON.parse(logs);
+    let logsObj;
+    try {
+      logsObj = JSON.parse(logs);
+    } catch (e) {
+      // invalid logs, skip
+      continue;
+    }
+
     let payloadObj = null;
 
     if (logsObj) {
@@ -86,10 +93,14 @@ async function parseBlock(block) {
             if (txToSave) {
               // check if there is a memo in the transfer
               if (payloadObj === null) {
-                payloadObj = JSON.parse(payload);
+                try {
+                  payloadObj = JSON.parse(payload);
+                } catch (e) {
+                  // invalid payload
+                }
               }
 
-              const { memo } = payloadObj;
+              const memo = payloadObj ? payloadObj.memo : null;
               let query = '';
 
               if (memo && typeof memo === 'string') {

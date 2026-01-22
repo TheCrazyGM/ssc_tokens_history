@@ -27,19 +27,8 @@ historyRouter.get('/', async (req, res) => {
       symbol,
     } = query;
 
-    let sOffset = parseInt(offset, 10);
-    if (isNaN(sOffset)) { // eslint-disable-line no-restricted-globals
-      sOffset = 0;
-    }
-
-    let sLimit = parseInt(limit, 10);
-    if (isNaN(sLimit)) { // eslint-disable-line no-restricted-globals
-      sLimit = 500;
-    } else if (sLimit > 500) {
-      sLimit = 500;
-    } else if (sLimit <= 0) {
-      sLimit = 1;
-    }
+    const sOffset = Math.max(0, parseInt(offset, 10) || 0);
+    const sLimit = Math.min(500, Math.max(1, parseInt(limit, 10) || 500));
 
     const sType = type !== 'user' && type !== 'contract' ? 'user' : type;
 
@@ -53,7 +42,7 @@ historyRouter.get('/', async (req, res) => {
           ("to" = $1 AND "to_type" = $2)
         ) AND
         "symbol" = $3
-      ORDER BY "timestamp" DESC
+      ORDER BY "timestamp" DESC, "txid" ASC
       OFFSET $4
       LIMIT $5`;
 
@@ -67,7 +56,7 @@ historyRouter.get('/', async (req, res) => {
       WHERE 
         ("from" = $1 AND "from_type" = $2) OR
         ("to" = $1 AND "to_type" = $2)
-      ORDER BY "timestamp" DESC
+      ORDER BY "timestamp" DESC, "txid" ASC
       OFFSET $3
       LIMIT $4`;
 
@@ -84,7 +73,6 @@ historyRouter.get('/', async (req, res) => {
 app.use('/history', historyRouter);
 
 app.set('trust proxy', true);
-app.set('trust proxy', 'loopback');
 
 app.listen(config.port);
 
