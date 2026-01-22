@@ -10,7 +10,7 @@ Used by [Steem-Engine](https://steem-engine.com) for transaction history (endpoi
 
 Created and maintained by @harpagon210 [(Original Github Repo)](https://github.com/harpagon210/ssc_tokens_history)
 
-Some additional contributions by @someguy123 / @privex [(Privex Fork)](https://github.com/Privex/ssc_tokens_history)
+Some additional contributions by @someguy123 / @privex [(Privex Fork)](https://github.com/Privex/ssc_tokens_history) and @TheCrazyGM
 
 Released under the **MIT License** (See the file `LICENSE` for more info)
 
