@@ -30,6 +30,8 @@
   },
   "overrides": {
     "axios": "^1.7.9",
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "fast-xml-parser": "^5.3.8",
+    "serialize-javascript": "^7.0.3"
   }
 }
