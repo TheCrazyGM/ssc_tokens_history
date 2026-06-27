@@ -4,7 +4,6 @@ require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const SSC = require('sscjs');
 const fs = require('fs-extra');
-const config = require('./config');
 const { parseBlock, createCollections } = require('./history_builder');
 
 const DEFAULT_REMOTE_NODE = 'https://api.hive-engine.com/rpc/';
@@ -74,52 +73,35 @@ function parseArgs() {
   return opts;
 }
 
-async function getBlockRange(chainColl, opts) {
+async function getBlockRange(accountsHistory, opts) {
   if (opts.rangeStart !== null && opts.rangeEnd !== null) {
     return { start: opts.rangeStart, end: opts.rangeEnd };
   }
 
-  const maxBlock = await chainColl.findOne({}, { sort: { _id: -1 }, projection: { _id: 1 } });
-  if (!maxBlock) {
-    throw new Error('No blocks found in hsc.chain');
+  const maxParsed = await accountsHistory.findOne(
+    {},
+    { sort: { blockNumber: -1 }, projection: { blockNumber: 1 } },
+  );
+  if (!maxParsed) {
+    throw new Error('No parsed blocks found in accountsHistory. Run the parser first.');
   }
 
-  const end = maxBlock._id;
+  const end = maxParsed.blockNumber;
   const start = Math.max(1, end - opts.last + 1);
   return { start, end };
 }
 
-async function findLocalGaps(chainColl, start, end) {
-  const localBlocks = await chainColl.aggregate([
-    { $match: { _id: { $gte: start, $lte: end } } },
-    {
-      $project: {
-        _id: 1,
-        txCount: { $size: { $ifNull: ['$transactions', []] } },
-        vtxCount: { $size: { $ifNull: ['$virtualTransactions', []] } },
-        hash: 1,
-      },
-    },
+async function findParsedBlocks(accountsHistory, start, end) {
+  const parsed = await accountsHistory.aggregate([
+    { $match: { blockNumber: { $gte: start, $lte: end } } },
+    { $group: { _id: '$blockNumber', txCount: { $sum: 1 } } },
   ]).toArray();
 
-  const localMap = new Map();
-  for (const block of localBlocks) {
-    localMap.set(block._id, {
-      blockNumber: block._id,
-      txCount: block.txCount,
-      vtxCount: block.vtxCount,
-      hash: block.hash,
-    });
+  const parsedMap = new Map();
+  for (const doc of parsed) {
+    parsedMap.set(doc._id, doc.txCount);
   }
-
-  const missing = [];
-  for (let i = start; i <= end; i += 1) {
-    if (!localMap.has(i)) {
-      missing.push(i);
-    }
-  }
-
-  return { localMap, missing };
+  return parsedMap;
 }
 
 async function fetchRemoteBlock(ssc, blockNumber) {
@@ -147,7 +129,7 @@ function chunk(arr, size) {
   return chunks;
 }
 
-async function auditBlocks(start, end, localMap, remoteNode, concurrency, verbose) {
+async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbose) {
   const ssc = new SSC(remoteNode);
   const allBlockNumbers = [];
   for (let i = start; i <= end; i += 1) {
@@ -157,8 +139,8 @@ async function auditBlocks(start, end, localMap, remoteNode, concurrency, verbos
   const results = {
     ok: [],
     missing: [],
-    mismatch: [],
-    orphaned: [],
+    partial: [],
+    empty: [],
     errors: [],
   };
 
@@ -168,13 +150,12 @@ async function auditBlocks(start, end, localMap, remoteNode, concurrency, verbos
   for (const batch of batches) {
     const remoteResults = await Promise.all(
       batch.map(async (blockNumber) => {
-        const local = localMap.get(blockNumber);
         const remote = await fetchRemoteBlock(ssc, blockNumber);
-        return { blockNumber, local, remote };
+        return { blockNumber, remote };
       }),
     );
 
-    for (const { blockNumber, local, remote } of remoteResults) {
+    for (const { blockNumber, remote } of remoteResults) {
       processed += 1;
 
       if (processed % 500 === 0 || processed === allBlockNumbers.length) {
@@ -189,49 +170,49 @@ async function auditBlocks(start, end, localMap, remoteNode, concurrency, verbos
         continue;
       }
 
-      if (!local && !remote) {
+      if (!remote) {
+        results.errors.push({ blockNumber, error: 'null response' });
+        continue;
+      }
+
+      const remoteTxCount = (remote.transactions || []).length;
+      const remoteVtxCount = (remote.virtualTransactions || []).length;
+      const remoteTotal = remoteTxCount + remoteVtxCount;
+      const parsedCount = parsedMap.get(blockNumber) || 0;
+
+      if (remoteTotal === 0) {
         results.ok.push(blockNumber);
         continue;
       }
 
-      if (!local && remote) {
+      if (parsedCount === 0) {
         results.missing.push({
           blockNumber,
-          remoteTxCount: (remote.transactions || []).length + (remote.virtualTransactions || []).length,
-          remoteHash: remote.hash,
+          remoteTxCount,
+          remoteVtxCount,
+          remoteTotal,
         });
         if (verbose) {
-          console.log(`\n  MISSING #${blockNumber} (remote has ${(remote.transactions || []).length} txs)`);
+          console.log(`\n  MISSING #${blockNumber} (${remoteTotal} txs on remote, 0 parsed locally)`);
         }
         continue;
       }
 
-      if (local && !remote) {
-        results.orphaned.push({
+      if (parsedCount < remoteTotal) {
+        results.partial.push({
           blockNumber,
-          localTxCount: local.txCount + local.vtxCount,
-          localHash: local.hash,
+          remoteTxCount,
+          remoteVtxCount,
+          remoteTotal,
+          parsedCount,
         });
         if (verbose) {
-          console.log(`\n  ORPHANED #${blockNumber} (local has ${local.txCount + local.vtxCount} txs)`);
+          console.log(`\n  PARTIAL #${blockNumber} (remote: ${remoteTotal}, parsed: ${parsedCount})`);
         }
         continue;
       }
 
-      if (local.hash !== remote.hash) {
-        results.mismatch.push({
-          blockNumber,
-          localHash: local.hash,
-          remoteHash: remote.hash,
-          localTxCount: local.txCount + local.vtxCount,
-          remoteTxCount: (remote.transactions || []).length + (remote.virtualTransactions || []).length,
-        });
-        if (verbose) {
-          console.log(`\n  MISMATCH #${blockNumber} local=${local.hash} remote=${remote.hash}`);
-        }
-      } else {
-        results.ok.push(blockNumber);
-      }
+      results.ok.push(blockNumber);
     }
   }
 
@@ -273,7 +254,7 @@ async function repairBlocks(blockNumbers, remoteNode, chainColl, accountsHistory
 }
 
 function printReport(results, range, opts, repairResult) {
-  const total = results.ok.length + results.missing.length + results.mismatch.length + results.orphaned.length + results.errors.length;
+  const total = results.ok.length + results.missing.length + results.partial.length + results.errors.length;
 
   console.log('');
   console.log('=== Block Audit Report ===');
@@ -281,9 +262,8 @@ function printReport(results, range, opts, repairResult) {
   console.log(`Remote: ${opts.remoteNode}`);
   console.log('');
   console.log(`  OK:       ${results.ok.length.toLocaleString()} blocks`);
-  console.log(`  Missing:  ${results.missing.length.toLocaleString()} blocks  (present on remote, absent locally)`);
-  console.log(`  Mismatch: ${results.mismatch.length.toLocaleString()} blocks  (hash differs)`);
-  console.log(`  Orphaned: ${results.orphaned.length.toLocaleString()} blocks  (present locally, absent on remote)`);
+  console.log(`  Missing:  ${results.missing.length.toLocaleString()} blocks  (txs on remote, 0 parsed locally)`);
+  console.log(`  Partial:  ${results.partial.length.toLocaleString()} blocks  (fewer txs parsed than remote)`);
   console.log(`  Errors:   ${results.errors.length.toLocaleString()} blocks  (failed to fetch from remote)`);
 
   if (results.missing.length > 0) {
@@ -292,10 +272,10 @@ function printReport(results, range, opts, repairResult) {
     console.log(`  Missing blocks: ${nums.slice(0, 50).join(', ')}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ''}`);
   }
 
-  if (results.mismatch.length > 0) {
-    const nums = results.mismatch.map(b => b.blockNumber);
+  if (results.partial.length > 0) {
+    const nums = results.partial.map(b => b.blockNumber);
     console.log('');
-    console.log(`  Mismatch blocks: ${nums.slice(0, 50).join(', ')}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ''}`);
+    console.log(`  Partial blocks: ${nums.slice(0, 50).join(', ')}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ''}`);
   }
 
   if (repairResult) {
@@ -318,16 +298,14 @@ async function writeReportJson(results, range, opts, repairResult) {
     range,
     remoteNode: opts.remoteNode,
     summary: {
-      total: results.ok.length + results.missing.length + results.mismatch.length + results.orphaned.length + results.errors.length,
+      total: results.ok.length + results.missing.length + results.partial.length + results.errors.length,
       ok: results.ok.length,
       missing: results.missing.length,
-      mismatch: results.mismatch.length,
-      orphaned: results.orphaned.length,
+      partial: results.partial.length,
       errors: results.errors.length,
     },
     missing: results.missing,
-    mismatch: results.mismatch,
-    orphaned: results.orphaned,
+    partial: results.partial,
     errors: results.errors,
   };
 
@@ -348,33 +326,30 @@ async function main() {
   console.log(`Connecting to MongoDB at ${process.env.DATABASE_URL}...`);
   const client = await MongoClient.connect(process.env.DATABASE_URL);
 
-  const databaseNameHsc = config.databaseNameHsc || 'hsc';
   const databaseNameHistory = process.env.DATABASE_NAME || 'hsc_history';
-
-  const dbHsc = client.db(databaseNameHsc);
   const dbHistory = client.db(databaseNameHistory);
-  const chainColl = dbHsc.collection('chain');
+  const chainColl = dbHistory.collection('chain');
 
   const accountsHistory = dbHistory.collection('accountsHistory');
   const nftHistory = dbHistory.collection('nftHistory');
   const marketHistory = dbHistory.collection('marketHistory');
 
-  console.log(`Determining block range...`);
-  const range = await getBlockRange(chainColl, opts);
+  console.log('Determining block range...');
+  const range = await getBlockRange(accountsHistory, opts);
   console.log(`Auditing blocks ${range.start.toLocaleString()} — ${range.end.toLocaleString()} (${(range.end - range.start + 1).toLocaleString()} blocks)`);
 
-  console.log(`Finding local gaps in hsc.chain...`);
-  const { localMap, missing } = await findLocalGaps(chainColl, range.start, range.end);
-  console.log(`Found ${localMap.size.toLocaleString()} local blocks, ${missing.length.toLocaleString()} missing from chain collection`);
+  console.log('Finding already-parsed blocks in accountsHistory...');
+  const parsedMap = await findParsedBlocks(accountsHistory, range.start, range.end);
+  console.log(`Found ${parsedMap.size.toLocaleString()} blocks with parsed data`);
 
   console.log(`Fetching from remote node: ${opts.remoteNode}`);
-  const results = await auditBlocks(range.start, range.end, localMap, opts.remoteNode, opts.concurrency, opts.verbose);
+  const results = await auditBlocks(range.start, range.end, parsedMap, opts.remoteNode, opts.concurrency, opts.verbose);
 
   let repairResult = null;
   if (opts.repair) {
     const blocksToRepair = [
       ...results.missing.map(b => b.blockNumber),
-      ...results.mismatch.map(b => b.blockNumber),
+      ...results.partial.map(b => b.blockNumber),
     ];
 
     if (blocksToRepair.length > 0) {
