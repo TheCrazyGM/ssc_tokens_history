@@ -6,6 +6,7 @@
   "scripts": {
     "start-parser": "node parser.js",
     "start-server": "node server.js",
+    "start-audit": "node audit.js",
     "test-all": "mocha ./test/test.js"
   },
   "keywords": [],
