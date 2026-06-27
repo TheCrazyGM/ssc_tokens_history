@@ -187,6 +187,7 @@ async function createCollections(db) {
   await accountsHistoryColl.createIndex({ account: 1, symbol: 1, operation: 1, timestamp: -1 });
   await accountsHistoryColl.createIndex({ transactionId: 1 });
   await accountsHistoryColl.createIndex({ timestamp: -1 });
+  await accountsHistoryColl.createIndex({ blockNumber: 1 });
   const nftHistoryColl = await db.createCollection('nftHistory');
   await nftHistoryColl.createIndex({ nftId: 1, account: 1, symbol: 1, timestamp: -1 });
   await nftHistoryColl.createIndex({ account: 1, symbol: 1, timestamp: -1 });
@@ -217,7 +218,9 @@ const init = async () => {
 
   // rollback if txs of the @lastSSCBlockParsed block have already been written
   console.log(`Starting rollback for block ${lastSSCBlockParsed}.`);
-  const block = await ssc.getBlockInfo(lastSSCBlockParsed);
+  const block = parseFromMongo
+    ? await getBlockInfo(lastSSCBlockParsed)
+    : await ssc.getBlockInfo(lastSSCBlockParsed);
   if (block) {
     const { timestamp } = block;
 

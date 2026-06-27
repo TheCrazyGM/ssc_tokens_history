@@ -1,12 +1,12 @@
 /* eslint-disable no-console */
 /* eslint-disable no-await-in-loop */
-require('dotenv').config();
-const { MongoClient } = require('mongodb');
-const SSC = require('sscjs');
-const fs = require('fs-extra');
-const { parseBlock, createCollections } = require('./history_builder');
+require("dotenv").config();
+const { MongoClient } = require("mongodb");
+const SSC = require("sscjs");
+const fs = require("fs-extra");
+const { parseBlock, createCollections } = require("./history_builder");
 
-const DEFAULT_REMOTE_NODE = 'https://api.hive-engine.com/rpc/';
+const DEFAULT_REMOTE_NODE = "https://api.hive-engine.com/rpc/";
 const FETCH_RETRIES = 3;
 const RETRY_BASE_MS = 500;
 
@@ -24,39 +24,41 @@ function parseArgs() {
 
   for (let i = 0; i < args.length; i += 1) {
     switch (args[i]) {
-      case '--last':
+      case "--last":
         opts.last = parseInt(args[i + 1], 10);
         i += 1;
         break;
-      case '--range':
+      case "--range":
         opts.rangeStart = parseInt(args[i + 1], 10);
         opts.rangeEnd = parseInt(args[i + 2], 10);
         i += 2;
         break;
-      case '--remote-node':
+      case "--remote-node":
         opts.remoteNode = args[i + 1];
         i += 1;
         break;
-      case '--repair':
+      case "--repair":
         opts.repair = true;
         break;
-      case '--verbose':
+      case "--verbose":
         opts.verbose = true;
         break;
-      case '--concurrency':
+      case "--concurrency":
         opts.concurrency = parseInt(args[i + 1], 10);
         i += 1;
         break;
-      case '--help':
-        console.log('Usage: node audit.js [options]');
-        console.log('');
-        console.log('Options:');
-        console.log('  --last <N>              Audit the last N blocks');
-        console.log('  --range <start> <end>   Audit blocks from start to end (inclusive)');
-        console.log('  --remote-node <url>     Remote RPC node (default: api.hive-engine.com/rpc/)');
-        console.log('  --repair                Re-fetch missing blocks and re-parse them');
-        console.log('  --verbose               Show per-block details');
-        console.log('  --concurrency <N>       Parallel remote fetches (default: 10)');
+      case "--help":
+        console.log("Usage: node audit.js [options]");
+        console.log("");
+        console.log("Options:");
+        console.log("  --last <N>              Audit the last N blocks");
+        console.log("  --range <start> <end>   Audit blocks from start to end (inclusive)");
+        console.log(
+          "  --remote-node <url>     Remote RPC node (default: api.hive-engine.com/rpc/)",
+        );
+        console.log("  --repair                Re-fetch missing blocks and re-parse them");
+        console.log("  --verbose               Show per-block details");
+        console.log("  --concurrency <N>       Parallel remote fetches (default: 10)");
         process.exit(0);
         break;
       default:
@@ -67,7 +69,7 @@ function parseArgs() {
 
   if (!opts.last && opts.rangeStart === null) {
     opts.last = 1000;
-    console.log('No range specified, defaulting to --last 1000');
+    console.log("No range specified, defaulting to --last 1000");
   }
 
   return opts;
@@ -83,7 +85,7 @@ async function getBlockRange(accountsHistory, opts) {
     { sort: { blockNumber: -1 }, projection: { blockNumber: 1 } },
   );
   if (!maxParsed) {
-    throw new Error('No parsed blocks found in accountsHistory. Run the parser first.');
+    throw new Error("No parsed blocks found in accountsHistory. Run the parser first.");
   }
 
   const end = maxParsed.blockNumber;
@@ -92,10 +94,12 @@ async function getBlockRange(accountsHistory, opts) {
 }
 
 async function findParsedBlocks(accountsHistory, start, end) {
-  const parsed = await accountsHistory.aggregate([
-    { $match: { blockNumber: { $gte: start, $lte: end } } },
-    { $group: { _id: '$blockNumber', txCount: { $sum: 1 } } },
-  ]).toArray();
+  const parsed = await accountsHistory
+    .aggregate([
+      { $match: { blockNumber: { $gte: start, $lte: end } } },
+      { $group: { _id: "$blockNumber", txCount: { $sum: 1 } } },
+    ])
+    .toArray();
 
   const parsedMap = new Map();
   for (const doc of parsed) {
@@ -111,8 +115,8 @@ async function fetchRemoteBlock(ssc, blockNumber) {
       return block;
     } catch (err) {
       if (attempt < FETCH_RETRIES) {
-        const delay = RETRY_BASE_MS * (2 ** (attempt - 1));
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const delay = RETRY_BASE_MS * 2 ** (attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
         return { error: err.message || String(err) };
       }
@@ -171,7 +175,7 @@ async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbo
       }
 
       if (!remote) {
-        results.errors.push({ blockNumber, error: 'null response' });
+        results.errors.push({ blockNumber, error: "null response" });
         continue;
       }
 
@@ -193,7 +197,9 @@ async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbo
           remoteTotal,
         });
         if (verbose) {
-          console.log(`\n  MISSING #${blockNumber} (${remoteTotal} txs on remote, 0 parsed locally)`);
+          console.log(
+            `\n  MISSING #${blockNumber} (${remoteTotal} txs on remote, 0 parsed locally)`,
+          );
         }
         continue;
       }
@@ -207,7 +213,9 @@ async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbo
           parsedCount,
         });
         if (verbose) {
-          console.log(`\n  PARTIAL #${blockNumber} (remote: ${remoteTotal}, parsed: ${parsedCount})`);
+          console.log(
+            `\n  PARTIAL #${blockNumber} (remote: ${remoteTotal}, parsed: ${parsedCount})`,
+          );
         }
         continue;
       }
@@ -216,11 +224,18 @@ async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbo
     }
   }
 
-  process.stdout.write('\n');
+  process.stdout.write("\n");
   return results;
 }
 
-async function repairBlocks(blockNumbers, remoteNode, chainColl, accountsHistory, nftHistory, marketHistory) {
+async function repairBlocks(
+  blockNumbers,
+  remoteNode,
+  chainColl,
+  accountsHistory,
+  nftHistory,
+  marketHistory,
+) {
   const ssc = new SSC(remoteNode);
   const repaired = [];
   const failed = [];
@@ -232,16 +247,12 @@ async function repairBlocks(blockNumbers, remoteNode, chainColl, accountsHistory
     const block = await fetchRemoteBlock(ssc, blockNumber);
 
     if (!block || block.error) {
-      failed.push({ blockNumber, error: block ? block.error : 'null response' });
+      failed.push({ blockNumber, error: block ? block.error : "null response" });
       continue;
     }
 
     try {
-      await chainColl.updateOne(
-        { _id: blockNumber },
-        { $set: block },
-        { upsert: true },
-      );
+      await chainColl.updateOne({ _id: blockNumber }, { $set: block }, { upsert: true });
       await parseBlock(block, accountsHistory, nftHistory, marketHistory);
       repaired.push(blockNumber);
     } catch (err) {
@@ -249,48 +260,61 @@ async function repairBlocks(blockNumbers, remoteNode, chainColl, accountsHistory
     }
   }
 
-  process.stdout.write('\n');
+  process.stdout.write("\n");
   return { repaired, failed };
 }
 
 function printReport(results, range, opts, repairResult) {
-  const total = results.ok.length + results.missing.length + results.partial.length + results.errors.length;
+  const total =
+    results.ok.length + results.missing.length + results.partial.length + results.errors.length;
 
-  console.log('');
-  console.log('=== Block Audit Report ===');
-  console.log(`Range: ${range.start.toLocaleString()} — ${range.end.toLocaleString()} (${total.toLocaleString()} blocks)`);
+  console.log("");
+  console.log("=== Block Audit Report ===");
+  console.log(
+    `Range: ${range.start.toLocaleString()} — ${range.end.toLocaleString()} (${total.toLocaleString()} blocks)`,
+  );
   console.log(`Remote: ${opts.remoteNode}`);
-  console.log('');
+  console.log("");
   console.log(`  OK:       ${results.ok.length.toLocaleString()} blocks`);
-  console.log(`  Missing:  ${results.missing.length.toLocaleString()} blocks  (txs on remote, 0 parsed locally)`);
-  console.log(`  Partial:  ${results.partial.length.toLocaleString()} blocks  (fewer txs parsed than remote)`);
-  console.log(`  Errors:   ${results.errors.length.toLocaleString()} blocks  (failed to fetch from remote)`);
+  console.log(
+    `  Missing:  ${results.missing.length.toLocaleString()} blocks  (txs on remote, 0 parsed locally)`,
+  );
+  console.log(
+    `  Partial:  ${results.partial.length.toLocaleString()} blocks  (fewer txs parsed than remote)`,
+  );
+  console.log(
+    `  Errors:   ${results.errors.length.toLocaleString()} blocks  (failed to fetch from remote)`,
+  );
 
   if (results.missing.length > 0) {
-    const nums = results.missing.map(b => b.blockNumber);
-    console.log('');
-    console.log(`  Missing blocks: ${nums.slice(0, 50).join(', ')}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ''}`);
+    const nums = results.missing.map((b) => b.blockNumber);
+    console.log("");
+    console.log(
+      `  Missing blocks: ${nums.slice(0, 50).join(", ")}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ""}`,
+    );
   }
 
   if (results.partial.length > 0) {
-    const nums = results.partial.map(b => b.blockNumber);
-    console.log('');
-    console.log(`  Partial blocks: ${nums.slice(0, 50).join(', ')}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ''}`);
+    const nums = results.partial.map((b) => b.blockNumber);
+    console.log("");
+    console.log(
+      `  Partial blocks: ${nums.slice(0, 50).join(", ")}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ""}`,
+    );
   }
 
   if (repairResult) {
-    console.log('');
+    console.log("");
     console.log(`  Repaired: ${repairResult.repaired.length} blocks`);
     if (repairResult.failed.length > 0) {
       console.log(`  Repair failed: ${repairResult.failed.length} blocks`);
     }
   }
 
-  console.log('');
+  console.log("");
 }
 
 async function writeReportJson(results, range, opts, repairResult) {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `audit_report_${timestamp}.json`;
 
   const report = {
@@ -298,7 +322,8 @@ async function writeReportJson(results, range, opts, repairResult) {
     range,
     remoteNode: opts.remoteNode,
     summary: {
-      total: results.ok.length + results.missing.length + results.partial.length + results.errors.length,
+      total:
+        results.ok.length + results.missing.length + results.partial.length + results.errors.length,
       ok: results.ok.length,
       missing: results.missing.length,
       partial: results.partial.length,
@@ -326,38 +351,57 @@ async function main() {
   console.log(`Connecting to MongoDB at ${process.env.DATABASE_URL}...`);
   const client = await MongoClient.connect(process.env.DATABASE_URL);
 
-  const databaseNameHistory = process.env.DATABASE_NAME || 'hsc_history';
+  const databaseNameHistory = process.env.DATABASE_NAME || "hsc_history";
   const dbHistory = client.db(databaseNameHistory);
-  const chainColl = dbHistory.collection('chain');
+  const chainColl = dbHistory.collection("chain");
 
-  const accountsHistory = dbHistory.collection('accountsHistory');
-  const nftHistory = dbHistory.collection('nftHistory');
-  const marketHistory = dbHistory.collection('marketHistory');
+  const accountsHistory = dbHistory.collection("accountsHistory");
+  const nftHistory = dbHistory.collection("nftHistory");
+  const marketHistory = dbHistory.collection("marketHistory");
 
-  console.log('Determining block range...');
+  console.log("Ensuring indexes...");
+  await accountsHistory.createIndex({ blockNumber: 1 });
+
+  console.log("Determining block range...");
   const range = await getBlockRange(accountsHistory, opts);
-  console.log(`Auditing blocks ${range.start.toLocaleString()} — ${range.end.toLocaleString()} (${(range.end - range.start + 1).toLocaleString()} blocks)`);
+  console.log(
+    `Auditing blocks ${range.start.toLocaleString()} — ${range.end.toLocaleString()} (${(range.end - range.start + 1).toLocaleString()} blocks)`,
+  );
 
-  console.log('Finding already-parsed blocks in accountsHistory...');
+  console.log("Finding already-parsed blocks in accountsHistory...");
   const parsedMap = await findParsedBlocks(accountsHistory, range.start, range.end);
   console.log(`Found ${parsedMap.size.toLocaleString()} blocks with parsed data`);
 
   console.log(`Fetching from remote node: ${opts.remoteNode}`);
-  const results = await auditBlocks(range.start, range.end, parsedMap, opts.remoteNode, opts.concurrency, opts.verbose);
+  const results = await auditBlocks(
+    range.start,
+    range.end,
+    parsedMap,
+    opts.remoteNode,
+    opts.concurrency,
+    opts.verbose,
+  );
 
   let repairResult = null;
   if (opts.repair) {
     const blocksToRepair = [
-      ...results.missing.map(b => b.blockNumber),
-      ...results.partial.map(b => b.blockNumber),
+      ...results.missing.map((b) => b.blockNumber),
+      ...results.partial.map((b) => b.blockNumber),
     ];
 
     if (blocksToRepair.length > 0) {
       console.log(`\nRepairing ${blocksToRepair.length} blocks...`);
       await createCollections(dbHistory);
-      repairResult = await repairBlocks(blocksToRepair, opts.remoteNode, chainColl, accountsHistory, nftHistory, marketHistory);
+      repairResult = await repairBlocks(
+        blocksToRepair,
+        opts.remoteNode,
+        chainColl,
+        accountsHistory,
+        nftHistory,
+        marketHistory,
+      );
     } else {
-      console.log('\nNo blocks to repair.');
+      console.log("\nNo blocks to repair.");
     }
   }
 
@@ -365,10 +409,10 @@ async function main() {
   await writeReportJson(results, range, opts, repairResult);
 
   await client.close();
-  console.log('Done.');
+  console.log("Done.");
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err);
+  console.error("Fatal error:", err);
   process.exit(1);
 });
