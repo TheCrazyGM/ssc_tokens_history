@@ -6,7 +6,7 @@ const SSC = require("sscjs");
 const fs = require("fs-extra");
 const { parseBlock, createCollections } = require("./history_builder");
 
-const DEFAULT_REMOTE_NODE = "https://api.hive-engine.com/rpc/";
+const DEFAULT_REMOTE_NODE = "https://enginerpc.com";
 const FETCH_RETRIES = 3;
 const RETRY_BASE_MS = 500;
 
@@ -133,7 +133,31 @@ function chunk(arr, size) {
   return chunks;
 }
 
-async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbose) {
+function createMockCollection() {
+  const docs = [];
+  return {
+    docs,
+    insertOne: async (doc) => {
+      docs.push(JSON.parse(JSON.stringify(doc)));
+    },
+    insertMany: async (arr) => {
+      arr.forEach((doc) => docs.push(JSON.parse(JSON.stringify(doc))));
+    },
+    updateOne: async () => {},
+    findOne: async () => null,
+  };
+}
+
+async function auditBlocks(
+  start,
+  end,
+  remoteNode,
+  concurrency,
+  verbose,
+  accountsHistory,
+  nftHistory,
+  marketHistory,
+) {
   const ssc = new SSC(remoteNode);
   const allBlockNumbers = [];
   for (let i = start; i <= end; i += 1) {
@@ -144,7 +168,6 @@ async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbo
     ok: [],
     missing: [],
     partial: [],
-    empty: [],
     errors: [],
   };
 
@@ -179,43 +202,139 @@ async function auditBlocks(start, end, parsedMap, remoteNode, concurrency, verbo
         continue;
       }
 
-      const remoteTxCount = (remote.transactions || []).length;
-      const remoteVtxCount = (remote.virtualTransactions || []).length;
-      const remoteTotal = remoteTxCount + remoteVtxCount;
-      const parsedCount = parsedMap.get(blockNumber) || 0;
+      // Simulate parsing the remote block to find expected history documents
+      const mockAccounts = createMockCollection();
+      const mockNft = createMockCollection();
+      const mockMarket = createMockCollection();
 
-      if (remoteTotal === 0) {
-        results.ok.push(blockNumber);
-        continue;
-      }
-
-      if (parsedCount === 0) {
-        results.missing.push({
+      try {
+        await parseBlock(remote, mockAccounts, mockNft, mockMarket);
+      } catch (err) {
+        results.errors.push({
           blockNumber,
-          remoteTxCount,
-          remoteVtxCount,
-          remoteTotal,
+          error: `Simulate parse failed: ${err.message || String(err)}`,
         });
         if (verbose) {
-          console.log(
-            `\n  MISSING #${blockNumber} (${remoteTotal} txs on remote, 0 parsed locally)`,
-          );
+          console.log(`\n  ERROR #${blockNumber}: Simulate parse failed: ${err.message}`);
         }
         continue;
       }
 
-      if (parsedCount < remoteTotal) {
+      // Fetch actual history documents for this block from the database
+      const actualAccounts = await accountsHistory.find({ blockNumber }).toArray();
+      const actualNft = await nftHistory.find({ blockNumber }).toArray();
+
+      const missingTxs = [];
+      const extraTxs = [];
+
+      // Compare expected accountsHistory docs to actual docs
+      for (const expected of mockAccounts.docs) {
+        const matchIndex = actualAccounts.findIndex(
+          (actual) =>
+            actual.transactionId === expected.transactionId &&
+            actual.operation === expected.operation &&
+            actual.account === expected.account &&
+            String(actual.symbol || "") === String(expected.symbol || "") &&
+            String(actual.quantity || "") === String(expected.quantity || ""),
+        );
+        if (matchIndex >= 0) {
+          actualAccounts.splice(matchIndex, 1);
+        } else {
+          missingTxs.push(expected);
+        }
+      }
+
+      // Check remaining actualAccounts as extra/duplicates
+      if (actualAccounts.length > 0) {
+        extraTxs.push(...actualAccounts);
+      }
+
+      // Compare expected nftHistory docs to actual docs
+      for (const expected of mockNft.docs) {
+        const matchIndex = actualNft.findIndex(
+          (actual) =>
+            actual.nftId === expected.nftId &&
+            actual.symbol === expected.symbol &&
+            actual.account === expected.account &&
+            actual.accountHistoryId === expected.accountHistoryId,
+        );
+        if (matchIndex >= 0) {
+          actualNft.splice(matchIndex, 1);
+        } else {
+          missingTxs.push({ nft: true, ...expected });
+        }
+      }
+
+      // Check remaining actualNft as extra/duplicates
+      if (actualNft.length > 0) {
+        extraTxs.push(...actualNft);
+      }
+
+      const expectedCount = mockAccounts.docs.length + mockNft.docs.length;
+
+      if (expectedCount === 0) {
+        if (extraTxs.length > 0) {
+          results.partial.push({
+            blockNumber,
+            expectedCount,
+            missingCount: 0,
+            extraCount: extraTxs.length,
+            missing: [],
+            extra: extraTxs,
+          });
+          if (verbose) {
+            console.log(
+              `\n  OVERPARSED/DUPLICATES #${blockNumber} (expected: 0, extra: ${extraTxs.length})`,
+            );
+          }
+        } else {
+          results.ok.push(blockNumber);
+        }
+        continue;
+      }
+
+      if (missingTxs.length > 0) {
+        if (actualAccounts.length === 0 && actualNft.length === 0 && extraTxs.length === 0) {
+          results.missing.push({
+            blockNumber,
+            expectedCount,
+            missingCount: missingTxs.length,
+            missing: missingTxs,
+          });
+          if (verbose) {
+            console.log(
+              `\n  MISSING #${blockNumber} (expected ${expectedCount} docs, 0 found locally)`,
+            );
+          }
+        } else {
+          results.partial.push({
+            blockNumber,
+            expectedCount,
+            missingCount: missingTxs.length,
+            extraCount: extraTxs.length,
+            missing: missingTxs,
+            extra: extraTxs,
+          });
+          if (verbose) {
+            console.log(
+              `\n  PARTIAL #${blockNumber} (expected: ${expectedCount}, missing: ${missingTxs.length}, extra: ${extraTxs.length})`,
+            );
+          }
+        }
+        continue;
+      }
+
+      if (extraTxs.length > 0) {
         results.partial.push({
           blockNumber,
-          remoteTxCount,
-          remoteVtxCount,
-          remoteTotal,
-          parsedCount,
+          expectedCount,
+          missingCount: 0,
+          extraCount: extraTxs.length,
+          missing: [],
+          extra: extraTxs,
         });
         if (verbose) {
-          console.log(
-            `\n  PARTIAL #${blockNumber} (remote: ${remoteTotal}, parsed: ${parsedCount})`,
-          );
+          console.log(`\n  DUPLICATED #${blockNumber} (extra docs: ${extraTxs.length})`);
         }
         continue;
       }
@@ -253,6 +372,11 @@ async function repairBlocks(
 
     try {
       await chainColl.updateOne({ _id: blockNumber }, { $set: block }, { upsert: true });
+
+      // Clean out existing records first to avoid creating duplicates!
+      await accountsHistory.deleteMany({ blockNumber });
+      await nftHistory.deleteMany({ blockNumber });
+
       await parseBlock(block, accountsHistory, nftHistory, marketHistory);
       repaired.push(blockNumber);
     } catch (err) {
@@ -277,13 +401,13 @@ function printReport(results, range, opts, repairResult) {
   console.log("");
   console.log(`  OK:       ${results.ok.length.toLocaleString()} blocks`);
   console.log(
-    `  Missing:  ${results.missing.length.toLocaleString()} blocks  (txs on remote, 0 parsed locally)`,
+    `  Missing:  ${results.missing.length.toLocaleString()} blocks  (expected txs missing locally)`,
   );
   console.log(
-    `  Partial:  ${results.partial.length.toLocaleString()} blocks  (fewer txs parsed than remote)`,
+    `  Partial/Duplicated:  ${results.partial.length.toLocaleString()} blocks  (expected vs actual mismatch or duplicates)`,
   );
   console.log(
-    `  Errors:   ${results.errors.length.toLocaleString()} blocks  (failed to fetch from remote)`,
+    `  Errors:   ${results.errors.length.toLocaleString()} blocks  (failed to fetch/parse block)`,
   );
 
   if (results.missing.length > 0) {
@@ -298,7 +422,7 @@ function printReport(results, range, opts, repairResult) {
     const nums = results.partial.map((b) => b.blockNumber);
     console.log("");
     console.log(
-      `  Partial blocks: ${nums.slice(0, 50).join(", ")}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ""}`,
+      `  Partial/Duplicated blocks: ${nums.slice(0, 50).join(", ")}${nums.length > 50 ? ` ... (+${nums.length - 50} more)` : ""}`,
     );
   }
 
@@ -368,25 +492,23 @@ async function main() {
     `Auditing blocks ${range.start.toLocaleString()} — ${range.end.toLocaleString()} (${(range.end - range.start + 1).toLocaleString()} blocks)`,
   );
 
-  console.log("Finding already-parsed blocks in accountsHistory...");
-  const parsedMap = await findParsedBlocks(accountsHistory, range.start, range.end);
-  console.log(`Found ${parsedMap.size.toLocaleString()} blocks with parsed data`);
-
   console.log(`Fetching from remote node: ${opts.remoteNode}`);
   const results = await auditBlocks(
     range.start,
     range.end,
-    parsedMap,
     opts.remoteNode,
     opts.concurrency,
     opts.verbose,
+    accountsHistory,
+    nftHistory,
+    marketHistory,
   );
 
   let repairResult = null;
   if (opts.repair) {
     const blocksToRepair = [
       ...results.missing.map((b) => b.blockNumber),
-      ...results.partial.map((b) => b.blockNumber),
+      ...results.partial.filter((b) => b.missingCount > 0).map((b) => b.blockNumber),
     ];
 
     if (blocksToRepair.length > 0) {

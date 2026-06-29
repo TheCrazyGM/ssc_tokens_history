@@ -71,13 +71,13 @@ https://accounts.hive-engine.com/accountHistory
 
 - `tokens_create`: a token was created
 - `tokens_issue`: tokens were issued
-- `tokens_transfer`: tokens were transfered between accounts
-- `tokens_transferToContract`: tokens were transfered from an account to a contract
-- `tokens_transferFromContract`: tokens were transfered from a contract to an account
+- `tokens_transfer`: tokens were transferred between accounts
+- `tokens_transferToContract`: tokens were transferred from an account to a contract
+- `tokens_transferFromContract`: tokens were transferred from a contract to an account
 - `tokens_updatePrecision`: the precision of a token was updated
 - `tokens_updateUrl`: the url of a token was updated
 - `tokens_updateMetadata`: the metadata of a token was updated
-- `tokens_transferOwnership`: the ownership of a token was transfered
+- `tokens_transferOwnership`: the ownership of a token was transferred
 - `tokens_enableStaking`: staking was enabled for a token
 - `tokens_enableDelegation`: delegation was enabled for a token
 - `tokens_stake`: tokens were staked
@@ -102,7 +102,6 @@ For all actions which require a fee there will be an operation:
 - `market_sell`: tokens were sold
 - `market_sellRemaining': transfer of remaining tokens
 - `market_close`: an order was closed
-
 
 ##### Mining contract
 
@@ -131,17 +130,17 @@ For all actions which require a fee there will be an operation:
 - `nft_undelegate`: an undelegation was started for a nft
 - `nft_undelegateDone`: an undelegation was finished for a nft
 - `nft_enableDelegation`: enable delegation for a nft symbol
-- `nft_create`:  create a new nft symbol
-- `nft_addAuthorizedIssuingAccounts`:  authorized issuing accounts were added to a nft
+- `nft_create`: create a new nft symbol
+- `nft_addAuthorizedIssuingAccounts`: authorized issuing accounts were added to a nft
 - `nft_setGroupBy`: group by was set for a nft symbol
 - `nft_setProperties`: properties were set for a nft symbol
 - `nft_addProperty`: a property was added to a nft
-- `nft_setPropertyPermissions`:  property permissions were set for a nft symbol
+- `nft_setPropertyPermissions`: property permissions were set for a nft symbol
 - `nft_updatePropertyDefinition`: the property definition was updated for a nft
-- `nft_updateUrl`:  the url of a nft was updated
-- `nft_updateMetadata`:  the metadata of a nft was updated
-- `nft_updateName`:  the name of a nft was updated
-- `nft_updateOrgName`:  the org name of a nft was updated
+- `nft_updateUrl`: the url of a nft was updated
+- `nft_updateMetadata`: the metadata of a nft was updated
+- `nft_updateName`: the name of a nft was updated
+- `nft_updateOrgName`: the org name of a nft was updated
 - `nft_updateProductName`: the product name of a nft was updated
 
 For all nft actions which require a fee there will be an operation:
@@ -156,8 +155,6 @@ For all nft actions which require a fee there will be an operation:
 - `nftmarket_cancel`: cancel an order
 - `nftmarket_changePrice`: change the price of an order
 - `nftmarket_enableMarket`: enable market for nft symbol
-
-
 
 ### Market History
 
@@ -184,7 +181,6 @@ https://accounts.hive-engine.com/marketHistory
 
 - `https://accounts.hive-engine.com/marketHistory?symbol=BEE`
 - `https://accounts.hive-engine.com/marketHistory?symbol=BEE&timestampStart=1554163200&timestampEnd=1554422400`
-
 
 ### NFT History
 
